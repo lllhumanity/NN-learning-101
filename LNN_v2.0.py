@@ -6,7 +6,7 @@ from torch.utils.data import Dataset, DataLoader
 from tqdm import tqdm
 import os
 
-batch_size = 256
+batch_size = 25600
 train_data_dir = "train_data"
 test_data_dir = "validate_data"
 checkpoint_path = "checkpoint.pth"
@@ -26,51 +26,44 @@ class classificationDataset(Dataset):
     def __len__(self):
         return len(self.feature_chunks)
 
-def load_data(outdir: str, batch_size: int):
+def load_data(outdir: str, batch_size: int, ndp: int):
     '''
     this function is used to load the data from the feature and label chunks, and return the data and label in the form of tensor.
     '''
     #read metadata file
-    metadata_file = os.path.join(outdir, "metadata.toml")
-    metadata = toml.load(metadata_file)
-    feature_chunk_sizes = metadata["feature_chunk_sizes"]
+    #metadata_file = os.path.join(outdir, "metadata.toml")
+    #metadata = toml.load(metadata_file)
+    #feature_chunk_sizes = metadata["feature_chunk_sizes"]
     
-    ndp = np.sum(feature_chunk_sizes)
-    n_feature_chunks = len(feature_chunk_sizes)
+    #ndp = np.sum(feature_chunk_sizes)
+    #n_feature_chunks = len(feature_chunk_sizes)
     
     #initialize output
-    fX = np.zeros((ndp, 4, 257), dtype=np.uint8)
-    fy = np.zeros((ndp,), dtype=np.uint8)
-    start_idx = 0
-    for chunk_idx in range(n_feature_chunks):
-        feature_chunk_file = os.path.join(outdir, f"chunk_{chunk_idx}.fX.npy")
-        label_chunk_file = os.path.join(outdir, f"chunk_{chunk_idx}.fy.npy")
-        fX_chunk = np.load(feature_chunk_file, mmap_mode='r')
-        fy_chunk = np.load(label_chunk_file, mmap_mode='r')
-        end_idx = start_idx + len(fy_chunk)
-        fX[start_idx:end_idx, :, :] = fX_chunk
-        fy[start_idx:end_idx] = fy_chunk
-        start_idx = end_idx
+    fX = np.zeros((ndp, 4, 257), dtype=np.float32)
+    fy = np.zeros((ndp,), dtype=np.float32)
+    chunk_idx = 0
+    #start_idx = 0
+    #for chunk_idx in range(n_feature_chunks):
+    #    feature_chunk_file = os.path.join(outdir, f"chunk_{chunk_idx}.fX.npy")
+    #    label_chunk_file = os.path.join(outdir, f"chunk_{chunk_idx}.fy.npy")
+    #    fX_chunk = np.load(feature_chunk_file, mmap_mode='r')
+    #    fy_chunk = np.load(label_chunk_file, mmap_mode='r')
+    #    end_idx = start_idx + len(fy_chunk)
+    #    fX[start_idx:end_idx, :, :] = fX_chunk
+    #    fy[start_idx:end_idx] = fy_chunk
+    #    start_idx = end_idx
+    feature_chunk_file = os.path.join(outdir, f"chunk_{chunk_idx}.fX.npy")
+    fX_chunk = np.load(feature_chunk_file, mmap_mode='r')
+    label_chunk_file = os.path.join(outdir, f"chunk_{chunk_idx}.fy.npy")
+    fy_chunk = np.load(label_chunk_file, mmap_mode='r')
+    fX[0:ndp, :, :] = fX_chunk
+    fy[0:ndp,] = fy_chunk
     print(f'[Info] load features finished! features shape: {fX.shape}, labels shape: {fy.shape}')
     
     #construct dataset and dataloader
     dataset = classificationDataset(fX, fy)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=4)
     return dataloader
-    
-
-
-#loading train and test data
-print(f"loading train data")
-train_dataloader = DataLoader(
-    classificationDataset(
-        feature_chunks=["train_data/chunk_0.fX.npy", "train_data/chunk_1.fX.npy"],
-        label_chunks=["train_data/chunk_0.fy.npy", "train_data/chunk_1.fy.npy"]
-    ),
-    batch_size=batch_size,
-    num_workers=4,
-    shuffle=True
-)   
 
 class LNNmodelv2(nn.Module):
     '''
@@ -118,13 +111,12 @@ def train_model(
     start_epoch = 0
     best_accuracy = 0.0
     criterion = nn.BCEWithLogitsLoss()                          #binary cross entropy loss
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)  #adam optimizer
-    model.to(device)                                            #move model to device
+    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)  #adam optimizer                                            
     model.apply(initialize_model)                               #initialize model weight
     
     #2. load validate data once
     print(f"loading validate data")
-    val_dataloader = load_data("validate_data", batch_size=batch_size)
+    val_dataloader = load_data("validate_data", batch_size=batch_size, ndp=840484)
     print(f"validate data loaded")
     
     #3. ckpt loading
@@ -148,22 +140,24 @@ def train_model(
         with_flops=True
     ) as profiler:
         for epoch in range(start_epoch, num_epochs):
+            model.to(device)
             model.train()
             train_loss = 0.0
-            train_dataloader = load_data("train_data", batch_size=batch_size)
-            with tqdm as pbar:
-                pbar.set_description(f"Training Epoch {epoch+1}/{num_epochs}")
-                for batch_idx, (X, y) in enumerate(train_dataloader):
-                    X, y = X.to(device), y.to(device)
-                    optimizer.zero_grad()
-                    with torch.autocast(device_type=device.type):
-                        outputs = model(X).squeeze()
-                        loss = criterion(outputs, y)
-                    loss.backward()
-                    optimizer.step()
-                    train_loss += loss.item() * X.size(0)
-                    pbar.update(1)
-                    pbar.set_postfix({"loss": loss.item()})
+            print(f"epoch {epoch+1} start")
+            print(f"loading train data")
+            train_dataloader = load_data("train_data", batch_size=batch_size, ndp=842057)
+            pbar = tqdm(train_dataloader, desc=f"Training Epoch {epoch+1}/{num_epochs}")
+            for batch_idx, (X, y) in enumerate(pbar):
+                X, y = X.to(device), y.to(device)
+                optimizer.zero_grad()
+                with torch.autocast(device_type=device.type):
+                    outputs = model(X).squeeze()
+                    loss = criterion(outputs, y)
+                loss.backward()
+                optimizer.step()
+                train_loss += loss.item() * X.size(0)
+                pbar.set_postfix({"loss": loss.item()})
+            pbar.close()  # 关闭进度条
             profiler.step()
             
             #5. evaluate model on validate data
@@ -171,18 +165,17 @@ def train_model(
             test_loss = 0.0
             correct = 0
             with torch.no_grad():
-                with tqdm as pbar_test:
-                    pbar_test.set_description(f"Validating Epoch {epoch+1}/{num_epochs}")
-                    for batch_idx, (X, y) in enumerate(val_dataloader):
-                        X, y = X.to(device), y.to(device)
-                        with torch.autocast(device_type=device.type):
-                            outputs = model(X).squeeze()
-                            test_loss += criterion(outputs, y).item() * X.size(0)
-                            preds = (torch.sigmoid(outputs) > 0.5).float()
-                            correct += (preds == y).sum().item()
-                        pbar_test.update(1)
+                pbar_test = tqdm(val_dataloader, desc=f"Validating Epoch {epoch+1}/{num_epochs}")
+                for batch_idx, (X, y) in enumerate(pbar_test):
+                    X, y = X.to(device), y.to(device)
+                    with torch.autocast(device_type=device.type):
+                        outputs = model(X).squeeze()
+                        test_loss += criterion(outputs, y).item() * X.size(0)
+                        preds = (torch.sigmoid(outputs) > 0.5).float()
+                        correct += (preds == y).sum().item()
+                    pbar_test.set_postfix({"loss": test_loss / ((batch_idx + 1) * batch_size)})
+                pbar_test.close()
             
-                        pbar_test.set_postfix({"loss": test_loss.item()})
             train_loss = train_loss / ((batch_idx + 1) * batch_size)
             test_loss = test_loss / ((batch_idx + 1) * batch_size)
             accuracy = correct / ((batch_idx + 1) * batch_size)

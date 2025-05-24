@@ -114,16 +114,25 @@ def train_model(
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)  #adam optimizer                                            
     model.apply(initialize_model)                               #initialize model weight
     
-    #2. load validate data once
+    #2. load validate and train data once
     print(f"loading validate data")
     val_dataloader = load_data("validate_data", batch_size=batch_size, ndp=840484)
     print(f"validate data loaded")
-    
+    print(f"loading train data")
+    train_dataloader = load_data("train_data", batch_size=batch_size, ndp=842057)
+    print(f"train data loaded")
+      
     #3. ckpt loading
     if os.path.exists(checkpoint_path):
         train_from_ckpt = True
         checkpoint = torch.load(checkpoint_path, map_location=device)
         model.load_state_dict(checkpoint['model'])
+        model.to(device)
+        # 将优化器的状态字典中的张量移动到正确的设备上
+        for state in optimizer.state.values():
+            for k, v in state.items():
+                if isinstance(v, torch.Tensor):
+                    state[k] = v.to(device)
         optimizer.load_state_dict(checkpoint['optimizer'])
         start_epoch = checkpoint['epoch'] + 1
         best_accuracy = checkpoint.get('best_accuracy', 0.0)
@@ -145,7 +154,6 @@ def train_model(
             train_loss = 0.0
             print(f"epoch {epoch+1} start")
             print(f"loading train data")
-            train_dataloader = load_data("train_data", batch_size=batch_size, ndp=842057)
             pbar = tqdm(train_dataloader, desc=f"Training Epoch {epoch+1}/{num_epochs}")
             for batch_idx, (X, y) in enumerate(pbar):
                 X, y = X.to(device), y.to(device)
@@ -159,6 +167,12 @@ def train_model(
                 pbar.set_postfix({"loss": loss.item()})
             pbar.close()  # 关闭进度条
             profiler.step()
+            
+            ## 手动释放 train_dataloader 相关内存
+            #del train_dataloader
+            #import gc
+            #gc.collect()
+            #torch.cuda.empty_cache()
             
             #5. evaluate model on validate data
             model.eval()

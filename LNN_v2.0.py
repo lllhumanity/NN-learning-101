@@ -128,7 +128,7 @@ def train_model(
         checkpoint = torch.load(checkpoint_path, map_location=device)
         model.load_state_dict(checkpoint['model'])
         model.to(device)
-        # 将优化器的状态字典中的张量移动到正确的设备上
+        #move tensor to device
         for state in optimizer.state.values():
             for k, v in state.items():
                 if isinstance(v, torch.Tensor):
@@ -165,10 +165,10 @@ def train_model(
                 optimizer.step()
                 train_loss += loss.item() * X.size(0)
                 pbar.set_postfix({"loss": loss.item()})
-            pbar.close()  # 关闭进度条
+            pbar.close()
             profiler.step()
             
-            ## 手动释放 train_dataloader 相关内存
+            ## release train_dataloader memory
             #del train_dataloader
             #import gc
             #gc.collect()
